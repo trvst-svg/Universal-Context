@@ -1,12 +1,17 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
 	"time"
+
+	"uco-proxy/router"
 )
 
 func main() {
@@ -67,6 +72,33 @@ func main() {
 			masked = "<missing/invalid>"
 		}
 		log.Printf("[UCO Info] Intercepted POST /v1/chat/completions. Token: %s", masked)
+
+		// Read the request body bytes
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			log.Printf("[UCO Error] Failed to read request body: %v", err)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error": {"message": "Failed to read request body."}}`))
+			return
+		}
+
+		// Restore request body for downstream reverse proxy forwarding
+		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
+		// Parse chat payload for ContextRouter analysis
+		var payload router.ChatPayload
+		if err := json.Unmarshal(bodyBytes, &payload); err != nil {
+			log.Printf("[UCO Warning] Failed to parse request JSON: %v. Forwarding raw payload.", err)
+		} else {
+			// Run routing analysis using token budgeting
+			analysis := router.AnalyzePayload(payload, router.DefaultTokenCounter)
+			log.Printf("[UCO Info] ContextRouter Analysis for model '%s':", analysis.Model)
+			for idx, seg := range analysis.Segments {
+				log.Printf("  - Msg %d [%s] (Static: %t) -> Strategy: %s (Text: %d T, Vision Est: %d T)",
+					idx, seg.Role, seg.IsStatic, seg.Strategy, seg.TextTokens, seg.EstimatedVisionTokens)
+			}
+		}
 
 		// Serve the request using the Reverse Proxy
 		proxy.ServeHTTP(w, r)
