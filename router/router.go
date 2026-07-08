@@ -128,18 +128,61 @@ func CalculateOpenAIVisionTokens(width, height int) int {
 	return 85 + 170*int(tilesX*tilesY)
 }
 
-// EstimateTextDimensions calculates layout dimensions for a text block.
-// Defaults to Monaco 14pt (char width = 8px, line height = 22px, margin = 20px).
-func EstimateTextDimensions(text string, charWidth, lineHeight, margin int) (int, int) {
+// wrapText wraps text at word boundaries so that no line exceeds maxChars.
+func wrapText(text string, maxChars int) ([]string, int) {
+	text = strings.ReplaceAll(text, "\t", "    ")
+	var wrapped []string
 	lines := strings.Split(text, "\n")
-	numLines := len(lines)
 	maxLineLen := 0
+
 	for _, line := range lines {
-		expanded := strings.ReplaceAll(line, "\t", "    ")
-		if len(expanded) > maxLineLen {
-			maxLineLen = len(expanded)
+		if len(line) == 0 {
+			wrapped = append(wrapped, "")
+			continue
+		}
+
+		runes := []rune(line)
+		for len(runes) > 0 {
+			if len(runes) <= maxChars {
+				wrapped = append(wrapped, string(runes))
+				if len(runes) > maxLineLen {
+					maxLineLen = len(runes)
+				}
+				break
+			}
+
+			// Look for space to wrap at word boundary
+			wrapIdx := maxChars
+			for i := maxChars; i > 0; i-- {
+				if runes[i] == ' ' {
+					wrapIdx = i
+					break
+				}
+			}
+
+			// Wrap at wrapIdx
+			segment := runes[:wrapIdx]
+			wrapped = append(wrapped, string(segment))
+			if len(segment) > maxLineLen {
+				maxLineLen = len(segment)
+			}
+
+			// Remainder
+			runes = runes[wrapIdx:]
+			// Strip leading space of remainder
+			if len(runes) > 0 && runes[0] == ' ' {
+				runes = runes[1:]
+			}
 		}
 	}
+	return wrapped, maxLineLen
+}
+
+// EstimateTextDimensions calculates layout dimensions for a text block.
+// It applies text wrapping at 80 characters to match the custom renderer's layout behavior.
+func EstimateTextDimensions(text string, charWidth, lineHeight, margin int) (int, int) {
+	lines, maxLineLen := wrapText(text, 80)
+	numLines := len(lines)
 
 	width := maxLineLen*charWidth + margin*2
 	height := numLines*lineHeight + margin*2
@@ -187,8 +230,8 @@ func AnalyzePayload(payload ChatPayload, counter TokenCounter) PayloadAnalysis {
 			// Static Context runs through the Token Budgeting decision engine
 			textTokens = counter(text, payload.Model)
 			
-			// Estimate rendered dimensions (Monaco 14pt metrics)
-			w, h := EstimateTextDimensions(text, 8, 22, 20)
+			// Estimate rendered dimensions (Custom 10x16 bitmap metrics)
+			w, h := EstimateTextDimensions(text, 10, 16, 20)
 			visionTokens = CalculateOpenAIVisionTokens(w, h)
 
 			// Budget decision: If vision tile representation is cheaper, render it

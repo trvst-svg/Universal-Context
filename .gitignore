@@ -22,3 +22,8 @@ output/
 .DS_Store
 .vscode/
 .idea/
+
+# SQLite Database Files
+*.db
+*.db-shm
+*.db-wal
