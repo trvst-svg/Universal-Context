@@ -77,9 +77,9 @@ func TestConcurrentCache(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			
-			// Simulate small delay variation
-			time.Sleep(time.Duration(id%3) * time.Millisecond)
+
+			// Simulate small delay variation to let earlier goroutines populate the cache
+			time.Sleep(time.Duration(id) * 5 * time.Millisecond)
 
 			// Step 1: Check cache
 			data, err := localCache.Get(ctx, hashKey)

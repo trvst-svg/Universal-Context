@@ -11,7 +11,7 @@ import (
 
 func TestOpenAIAdapter(t *testing.T) {
 	originalPayload := []byte(`{"model": "gpt-4o", "temperature": 0.7, "messages": []}`)
-	
+
 	segments := []router.MessageSegment{
 		{
 			Role:        "system",
@@ -106,7 +106,7 @@ func TestOpenAIAdapter(t *testing.T) {
 
 func TestAnthropicAdapter(t *testing.T) {
 	originalPayload := []byte(`{"model": "claude-3-5-sonnet-20241022"}`)
-	
+
 	segments := []router.MessageSegment{
 		{
 			Role:        "system",
@@ -189,7 +189,7 @@ func TestAnthropicAdapter(t *testing.T) {
 
 func TestGeminiAdapter(t *testing.T) {
 	originalPayload := []byte(`{"model": "gemini-1.5-pro"}`)
-	
+
 	segments := []router.MessageSegment{
 		{
 			Role:        "system",

@@ -212,11 +212,11 @@ func AnalyzePayload(payload ChatPayload, counter TokenCounter) PayloadAnalysis {
 
 	for idx, msg := range payload.Messages {
 		text := msg.GetContentText()
-		
+
 		// The last message in the array represents the active User Instruction (Dynamic Context)
 		// Everything else (system prompt, older assistant/user history) is Static Context
 		isStatic := idx < (numMessages - 1)
-		
+
 		var strategy OptimizationStrategy
 		var textTokens int
 		var visionTokens int
@@ -229,7 +229,7 @@ func AnalyzePayload(payload ChatPayload, counter TokenCounter) PayloadAnalysis {
 		} else {
 			// Static Context runs through the Token Budgeting decision engine
 			textTokens = counter(text, payload.Model)
-			
+
 			// Estimate rendered dimensions (Custom 10x16 bitmap metrics)
 			w, h := EstimateTextDimensions(text, 10, 16, 20)
 			visionTokens = CalculateOpenAIVisionTokens(w, h)

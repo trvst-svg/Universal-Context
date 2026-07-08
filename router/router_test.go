@@ -71,10 +71,10 @@ func TestAnalyzePayload(t *testing.T) {
 			payload: ChatPayload{
 				Model: "gpt-4o",
 				Messages: []Message{
-					{Role: "system", Content: "small_system"}, // KeepText (short)
-					{Role: "user", Content: "large_code"},     // RenderBitmap (large static history)
+					{Role: "system", Content: "small_system"},    // KeepText (short)
+					{Role: "user", Content: "large_code"},        // RenderBitmap (large static history)
 					{Role: "assistant", Content: "small_system"}, // KeepText (short)
-					{Role: "user", Content: "user_query"},     // KeepText (dynamic query)
+					{Role: "user", Content: "user_query"},        // KeepText (dynamic query)
 				},
 			},
 			expectedRoles:    []string{"system", "user", "assistant", "user"},
