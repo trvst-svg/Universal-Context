@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"uco-proxy/adapters"
 	"uco-proxy/cache"
 	"uco-proxy/renderer"
 	"uco-proxy/router"
@@ -98,56 +99,85 @@ func main() {
 		var payload router.ChatPayload
 		if err := json.Unmarshal(bodyBytes, &payload); err != nil {
 			log.Printf("[UCO Warning] Failed to parse request JSON: %v. Forwarding raw payload.", err)
-		} else {
-			// Run routing analysis using token budgeting
-			analysis := router.AnalyzePayload(payload, router.DefaultTokenCounter)
-			log.Printf("[UCO Info] ContextRouter Analysis for model '%s':", analysis.Model)
-			for idx, seg := range analysis.Segments {
-				log.Printf("  - Msg %d [%s] (Static: %t) -> Strategy: %s (Text: %d T, Vision Est: %d T)",
-					idx, seg.Role, seg.IsStatic, seg.Strategy, seg.TextTokens, seg.EstimatedVisionTokens)
+			proxy.ServeHTTP(w, r)
+			return
+		}
 
-				// Orchestrate Milestone 4 Caching Flow if Strategy is RENDER_BITMAP
-				if seg.Strategy == router.RenderBitmap {
-					// Step 1: Compute SHA-256 hash of static text segment
-					hash := sha256.Sum256([]byte(seg.ContentText))
-					hashKey := fmt.Sprintf("uco:img:%x", hash)
+		// Run routing analysis using token budgeting
+		analysis := router.AnalyzePayload(payload, router.DefaultTokenCounter)
+		log.Printf("[UCO Info] ContextRouter Analysis for model '%s':", analysis.Model)
+		
+		imageBuffers := make(map[int][]byte)
+		hasOptimization := false
 
-					// Step 2: Query the Cache
-					cachedBytes, err := cache.GlobalCache.Get(r.Context(), hashKey)
+		for idx, seg := range analysis.Segments {
+			log.Printf("  - Msg %d [%s] (Static: %t) -> Strategy: %s (Text: %d T, Vision Est: %d T)",
+				idx, seg.Role, seg.IsStatic, seg.Strategy, seg.TextTokens, seg.EstimatedVisionTokens)
+
+			// Orchestrate Milestone 4 Caching Flow if Strategy is RENDER_BITMAP
+			if seg.Strategy == router.RenderBitmap {
+				// Step 1: Compute SHA-256 hash of static text segment
+				hash := sha256.Sum256([]byte(seg.ContentText))
+				hashKey := fmt.Sprintf("uco:img:%x", hash)
+
+				// Step 2: Query the Cache
+				cachedBytes, err := cache.GlobalCache.Get(r.Context(), hashKey)
+				if err != nil {
+					log.Printf("[UCO Error] Cache lookup failed for Msg %d: %v", idx, err)
+				}
+
+				if cachedBytes != nil {
+					// Cache HIT
+					log.Printf("[UCO Info] Cache HIT for Msg %d (hash: %s). Bypassing renderer.", idx, hashKey[:16])
+					imageBuffers[idx] = cachedBytes
+					hasOptimization = true
+				} else {
+					// Cache MISS
+					log.Printf("[UCO Info] Cache MISS for Msg %d (hash: %s). Rendering text to image...", idx, hashKey[:16])
+
+					renderStart := time.Now()
+					pngBytes, err := renderer.RenderTextToPNG(seg.ContentText)
+					renderDuration := time.Since(renderStart)
+
 					if err != nil {
-						log.Printf("[UCO Error] Cache lookup failed for Msg %d: %v", idx, err)
-					}
-
-					if cachedBytes != nil {
-						// Cache HIT
-						log.Printf("[UCO Info] Cache HIT for Msg %d (hash: %s). Bypassing renderer.", idx, hashKey[:16])
+						log.Printf("[UCO Error] Rendering failed for Msg %d: %v", idx, err)
 					} else {
-						// Cache MISS
-						log.Printf("[UCO Info] Cache MISS for Msg %d (hash: %s). Rendering text to image...", idx, hashKey[:16])
+						log.Printf("[UCO Info] Rendered Msg %d in %v (size: %d bytes)", idx, renderDuration, len(pngBytes))
+						imageBuffers[idx] = pngBytes
+						hasOptimization = true
 
-						renderStart := time.Now()
-						pngBytes, err := renderer.RenderTextToPNG(seg.ContentText)
-						renderDuration := time.Since(renderStart)
-
-						if err != nil {
-							log.Printf("[UCO Error] Rendering failed for Msg %d: %v", idx, err)
-						} else {
-							log.Printf("[UCO Info] Rendered Msg %d in %v (size: %d bytes)", idx, renderDuration, len(pngBytes))
-
-							// Step 3: Write to cache asynchronously with 24h expiration
-							go func(key string, val []byte) {
-								bgCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-								defer cancel()
-								if err := cache.GlobalCache.Set(bgCtx, key, val, 24*time.Hour); err != nil {
-									log.Printf("[UCO Error] Async cache write failed for %s: %v", key, err)
-								} else {
-									log.Printf("[UCO Info] Async cache write successful for %s", key[:16])
-								}
-							}(hashKey, pngBytes)
-						}
+						// Step 3: Write to cache asynchronously with 24h expiration
+						go func(key string, val []byte) {
+							bgCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+							defer cancel()
+							if err := cache.GlobalCache.Set(bgCtx, key, val, 24*time.Hour); err != nil {
+								log.Printf("[UCO Error] Async cache write failed for %s: %v", key, err)
+							} else {
+								log.Printf("[UCO Info] Async cache write successful for %s", key[:16])
+							}
+						}(hashKey, pngBytes)
 					}
 				}
 			}
+		}
+
+		// Mutate the payload if optimization occurred
+		if hasOptimization {
+			adapter := adapters.GetAdapter(payload.Model)
+			mutatedBody, err := adapter.AdaptPayload(r.Context(), analysis.Segments, imageBuffers, bodyBytes)
+			if err != nil {
+				log.Printf("[UCO Error] Failed to adapt payload: %v. Forwarding original payload.", err)
+				r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+			} else {
+				log.Printf("[UCO Info] Mutated request payload size: %d -> %d bytes", len(bodyBytes), len(mutatedBody))
+				// Replace request body with mutated payload
+				r.Body = io.NopCloser(bytes.NewBuffer(mutatedBody))
+				r.ContentLength = int64(len(mutatedBody))
+				r.Header.Set("Content-Length", fmt.Sprintf("%d", len(mutatedBody)))
+			}
+		} else {
+			// No optimization: restore original request body
+			r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 		}
 
 		// Serve the request using the Reverse Proxy
