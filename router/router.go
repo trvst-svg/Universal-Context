@@ -102,14 +102,7 @@ var DefaultTokenCounter TokenCounter = func(text string, model string) int {
 func CalculateOpenAIVisionTokens(width, height int) int {
 	w, h := float64(width), float64(height)
 
-	// Step 1: Scale down to fit 2048x2048
-	if w > 2048 || h > 2048 {
-		scale := math.Min(2048/w, 2048/h)
-		w = math.Round(w * scale)
-		h = math.Round(h * scale)
-	}
-
-	// Step 2: Scale shortest side to 768px
+	// Step 1: Scale shortest side to 768px
 	if w < h {
 		scale := 768.0 / w
 		w = 768
@@ -118,6 +111,13 @@ func CalculateOpenAIVisionTokens(width, height int) int {
 		scale := 768.0 / h
 		h = 768
 		w = math.Round(w * scale)
+	}
+
+	// Step 2: Scale down to fit 2048x2048 if necessary
+	if w > 2048 || h > 2048 {
+		scale := math.Min(2048/w, 2048/h)
+		w = math.Round(w * scale)
+		h = math.Round(h * scale)
 	}
 
 	// Step 3: Count 512x512 tiles

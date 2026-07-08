@@ -120,4 +120,12 @@ func TestCalculateOpenAIVisionTokens(t *testing.T) {
 	if tokensShort != 765 {
 		t.Errorf("Expected 765 tokens for 512x512 image, got %d", tokensShort)
 	}
+
+	// 1024x4096 image has a > 2.67 aspect ratio. Shortest side scales to 768 -> 768x3072.
+	// Longest side (3072) is > 2048, so it scales down to 2048 -> 512x2048.
+	// Tiles = ceil(512/512)*ceil(2048/512) = 1*4 = 4 tiles -> 765 tokens.
+	tokensAspect := CalculateOpenAIVisionTokens(1024, 4096)
+	if tokensAspect != 765 {
+		t.Errorf("Expected 765 tokens for 1024x4096 aspect ratio, got %d", tokensAspect)
+	}
 }

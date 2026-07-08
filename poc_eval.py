@@ -49,13 +49,7 @@ def calculate_openai_vision_tokens(width: int, height: int, detail: str = "high"
         
     w, h = width, height
     
-    # Step 1: Scale down to fit 2048x2048
-    if w > 2048 or h > 2048:
-        scale = min(2048 / w, 2048 / h)
-        w = int(w * scale)
-        h = int(h * scale)
-        
-    # Step 2: Scale such that shortest side is 768px
+    # Step 1: Scale such that shortest side is 768px
     if w < h:
         scale = 768 / w
         w = 768
@@ -64,6 +58,12 @@ def calculate_openai_vision_tokens(width: int, height: int, detail: str = "high"
         scale = 768 / h
         h = 768
         w = int(w * scale)
+        
+    # Step 2: Scale down to fit 2048x2048 if necessary
+    if w > 2048 or h > 2048:
+        scale = min(2048 / w, 2048 / h)
+        w = int(w * scale)
+        h = int(h * scale)
         
     # Step 3: Calculate tiles
     tiles_x = math.ceil(w / 512)
