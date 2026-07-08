@@ -1,0 +1,24 @@
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Go Binaries
+uco-proxy
+uco-proxy.exe
+
+# Generated Images and Artifacts
+*.png
+output_page_*
+output/
+
+# IDE / OS configs
+.DS_Store
+.vscode/
+.idea/
