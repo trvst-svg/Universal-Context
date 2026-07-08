@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -11,10 +14,15 @@ import (
 	"strings"
 	"time"
 
+	"uco-proxy/cache"
+	"uco-proxy/renderer"
 	"uco-proxy/router"
 )
 
 func main() {
+	// Initialize cache with fallback (attempts localhost:6379)
+	cache.InitCache("localhost:6379")
+
 	targetURL, err := url.Parse("https://api.openai.com")
 	if err != nil {
 		log.Fatalf("Error parsing target URL: %v", err)
@@ -97,6 +105,48 @@ func main() {
 			for idx, seg := range analysis.Segments {
 				log.Printf("  - Msg %d [%s] (Static: %t) -> Strategy: %s (Text: %d T, Vision Est: %d T)",
 					idx, seg.Role, seg.IsStatic, seg.Strategy, seg.TextTokens, seg.EstimatedVisionTokens)
+
+				// Orchestrate Milestone 4 Caching Flow if Strategy is RENDER_BITMAP
+				if seg.Strategy == router.RenderBitmap {
+					// Step 1: Compute SHA-256 hash of static text segment
+					hash := sha256.Sum256([]byte(seg.ContentText))
+					hashKey := fmt.Sprintf("uco:img:%x", hash)
+
+					// Step 2: Query the Cache
+					cachedBytes, err := cache.GlobalCache.Get(r.Context(), hashKey)
+					if err != nil {
+						log.Printf("[UCO Error] Cache lookup failed for Msg %d: %v", idx, err)
+					}
+
+					if cachedBytes != nil {
+						// Cache HIT
+						log.Printf("[UCO Info] Cache HIT for Msg %d (hash: %s). Bypassing renderer.", idx, hashKey[:16])
+					} else {
+						// Cache MISS
+						log.Printf("[UCO Info] Cache MISS for Msg %d (hash: %s). Rendering text to image...", idx, hashKey[:16])
+
+						renderStart := time.Now()
+						pngBytes, err := renderer.RenderTextToPNG(seg.ContentText)
+						renderDuration := time.Since(renderStart)
+
+						if err != nil {
+							log.Printf("[UCO Error] Rendering failed for Msg %d: %v", idx, err)
+						} else {
+							log.Printf("[UCO Info] Rendered Msg %d in %v (size: %d bytes)", idx, renderDuration, len(pngBytes))
+
+							// Step 3: Write to cache asynchronously with 24h expiration
+							go func(key string, val []byte) {
+								bgCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+								defer cancel()
+								if err := cache.GlobalCache.Set(bgCtx, key, val, 24*time.Hour); err != nil {
+									log.Printf("[UCO Error] Async cache write failed for %s: %v", key, err)
+								} else {
+									log.Printf("[UCO Info] Async cache write successful for %s", key[:16])
+								}
+							}(hashKey, pngBytes)
+						}
+					}
+				}
 			}
 		}
 
